@@ -31,29 +31,41 @@ A portable configuration system for [Claude Code](https://docs.anthropic.com/en/
 
 ## Quick Start
 
-### 1. Fork this repo
+### 1. Create your own private copy
 
-Click **Fork** on GitHub and set the visibility to **Private**. This gives you your own copy to customize freely — your commands, rules, and memory stay private.
+GitHub forks of public repos are always public. To keep your config private, create a new repo from this one:
+
+```bash
+# 1. Create a new private repo on GitHub (do NOT use Fork)
+gh repo create my-claude-memory --private
+
+# 2. Clone this repo, swap the remote to yours, and push
+git clone https://github.com/Serin511/Claude-Memory-Public.git ~/.claude-sync
+cd ~/.claude-sync
+git remote set-url origin https://github.com/<you>/my-claude-memory.git
+git push -u origin main
+```
+
+Or via the GitHub UI: click **Use this template** → **Create a new repository** → set visibility to **Private** (if the template button is available), then clone normally.
 
 ### 2. Install
 
 ```bash
-# Clone your fork and set up symlinks
-git clone https://github.com/<you>/Claude-Memory.git ~/.claude-sync
+# If you already cloned in Step 1, just run the installer
 ~/.claude-sync/install.sh
 
 source ~/.zshrc  # or ~/.bashrc
 ```
 
-Or as a one-liner:
+Or as a one-liner (replace with your private repo URL):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<you>/Claude-Memory/main/install.sh | bash -s -- https://github.com/<you>/Claude-Memory.git
+curl -fsSL https://raw.githubusercontent.com/<you>/my-claude-memory/main/install.sh | bash -s -- https://github.com/<you>/my-claude-memory.git
 source ~/.zshrc  # or ~/.bashrc
 ```
 
 This will:
-1. Clone your fork to `~/.claude-sync/`
+1. Clone your repo to `~/.claude-sync/`
 2. Symlink configurations into `~/.claude/` (commands, rules, CLAUDE.md)
 3. Add auto-sync hooks to your shell RC file
 
