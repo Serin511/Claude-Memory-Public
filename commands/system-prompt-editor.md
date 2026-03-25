@@ -2,6 +2,7 @@
 allowed-tools: Read, Edit, Write
 description: Edit your global CLAUDE.md system prompt
 argument-hint: [edit|show|backup]
+source: https://github.com/artemgetmann/claude-slash-commands
 ---
 
 # System Prompt Editor

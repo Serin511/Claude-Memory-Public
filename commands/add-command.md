@@ -2,6 +2,7 @@
 allowed-tools: Write
 description: Guide for creating new slash commands
 argument-hint: [command-name] [description]
+source: https://github.com/artemgetmann/claude-slash-commands
 ---
 
 # Slash Command Creator Guide
