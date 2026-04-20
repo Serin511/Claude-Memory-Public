@@ -25,6 +25,9 @@ A portable configuration system for [Claude Code](https://docs.anthropic.com/en/
 │   ├── tdd-workflow.md     # Red-green-refactor cycle enforcement
 │   ├── read-before-guessing.md   # Read class/API definitions before accessing attributes
 │   └── subagent.md         # Worktree isolation safety, background task constraints
+├── templates/              # Skill templates to copy into projects (not auto-installed)
+│   ├── plan-create/        # /plan-create — produce a structured execution plan doc
+│   └── plan-execute/       # /plan-execute — orchestrate subagents to run a plan doc
 └── scripts/
     └── parse_sessions.py   # Extract failure signals from session logs (used by /update-harness)
 ```
@@ -152,6 +155,25 @@ Rules are always loaded into Claude Code's context. Unlike commands, they don't 
 | `tdd-workflow.md` | Red → Green → Refactor cycle; tests before implementation |
 | `read-before-guessing.md` | Read class/API definitions before accessing attributes; inspect JSON before parsing |
 | `subagent.md` | Worktree isolation safety, background task constraints, zombie agent prevention |
+
+## Templates
+
+Reusable skill templates that are **not** auto-installed as global slash commands. Copy them into a project's `.claude/skills/` directory when you want `/plan-create` and `/plan-execute` scoped to that project.
+
+| Template | Purpose |
+|----------|---------|
+| `plan-create/`  | Produce a structured execution plan document for multi-phase projects |
+| `plan-execute/` | Execute a plan-create document by orchestrating subagents per major task |
+
+Deploy to a project:
+
+```bash
+mkdir -p .claude/skills
+cp -r ~/.claude-sync/templates/plan-create  .claude/skills/
+cp -r ~/.claude-sync/templates/plan-execute .claude/skills/
+```
+
+See `templates/README.md` for per-project customization notes.
 
 ## Customization
 
