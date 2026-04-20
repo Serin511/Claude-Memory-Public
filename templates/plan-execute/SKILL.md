@@ -375,9 +375,12 @@ the user:
 > Codex CLI or plugin not installed — skipping implementation review.
 > Install the `codex` CLI and the `codex@openai-codex` plugin to enable it.
 
-Still clear the plan-gate (set `stage: inactive` or delete the file) before
-returning control to the user — the next session should start fresh
-regardless of whether the review ran.
+Still release the plan-gate before returning control to the user — the next
+session should not be blocked by a stale `executing` state regardless of
+whether the review ran. Use the *stage-selection rule* in the post-review
+block below (end of Phase 6): `plan-approved` when the plan still has
+unfinished Major Tasks, `inactive` (or delete the file) when the plan is
+fully complete or the user is abandoning it.
 
 Steps (run only when the precondition above passes):
 
@@ -426,18 +429,43 @@ Steps (run only when the precondition above passes):
 5. **Do not** auto-apply Codex suggestions. The user owns the decision.
 
 After the review is complete (or running in the background and
-acknowledged by the user), clear the gate so the next session starts
-fresh:
+acknowledged by the user), transition the gate out of `executing` so the
+next session is not blocked by a stale state. The correct target stage
+depends on whether the plan still has unfinished work:
 
-```json
-{"stage": "inactive"}
-```
+**Stage-selection rule:**
 
-Or delete the file outright:
+- *Plan still has Major Tasks that are NOT STARTED or IN PROGRESS (the
+  common case — one task just finished, others remain):* set stage to
+  `plan-approved`. The plan is still the active, Codex-reviewed
+  execution artifact; the next `plan-execute` invocation should resume
+  on the next executable task without requiring a fresh `plan-create`
+  cycle.
 
-```bash
-rm "$CLAUDE_PROJECT_DIR/.claude/data/plan-gate.json"
-```
+  ```json
+  {
+    "stage": "plan-approved",
+    "plan_path": "<plan path>",
+    "session_id": "<same as before>",
+    "started_at": "<original>",
+    "approved_at": "<original>",
+    "execution_started_at": "<original, optional>",
+    "last_completed_task": "T<N>",
+    "last_completed_at": "<ISO 8601 now>"
+  }
+  ```
+
+- *Plan is fully DONE (all Major Tasks in final status: DONE / DEFERRED
+  / SKIPPED with no executable tasks left), or the user is abandoning
+  the plan:* set stage to `inactive`, or delete the file outright.
+
+  ```json
+  {"stage": "inactive"}
+  ```
+
+  ```bash
+  rm "$CLAUDE_PROJECT_DIR/.claude/data/plan-gate.json"
+  ```
 
 If the user chose to defer the Codex review (e.g. they want to push
 first), leave the gate at `executing` and the next plan-execute
