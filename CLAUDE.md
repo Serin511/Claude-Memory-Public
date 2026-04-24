@@ -2,6 +2,10 @@
 
 # Global Instructions
 
+## Chat Rules
+
+IMPORTANT: For anything ambiguous or that requires my decision, **always** ask me a clarifying question. Never make assumptions and proceed on your own.
+
 ## Parallelism
 - Spawn sub-agents for independent file modifications to process them in parallel.
 - Run tests, linting, and type checking concurrently.
@@ -13,5 +17,4 @@
 
 ## Memory
 
-- When the `/push` command is invoked by the user, both `git commit` and `git push` are considered explicitly requested. Proceed without additional confirmation.
 - Always write memory files in English.

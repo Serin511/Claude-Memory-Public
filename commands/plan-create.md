@@ -1,29 +1,8 @@
 ---
-name: plan-create
-description: >
-  Create a structured execution plan document for multi-phase projects. Breaks down a goal
-  into major tasks with dependency ordering, sub-tasks, verification gates, and carry-forward
-  rules — all in a format that plan-execute can run. Invoke explicitly via /plan-create.
+allowed-tools: Bash, Read, Edit, Write, Glob, Grep, Agent
+description: Create a structured execution plan document for multi-phase projects
 argument-hint: <goal or spec description>
 ---
-
-<!--
-  TEMPLATE NOTICE
-  ───────────────
-  This file is a reusable template shipped from ~/.claude-sync/templates/plan-create/.
-  When you first drop it into a project's .claude/skills/, review the sections marked
-  "Defaults" and "Examples" and adjust them to your project's stack (test runner,
-  benchmark runner, doc path, etc.). Everything else is language- and project-agnostic.
-
-  Plan Gate dependency: Phases 0, 4, and 5 write `.claude/data/plan-gate.json` to
-  coordinate with a `PreToolUse` hook (`.claude/hooks/plan_gate.py`) that blocks
-  implementation tools until the plan has been adversarially reviewed by Codex.
-  If the project does not install that hook, the gate writes are harmless no-ops
-  but the Phase 4.5 Codex review should still be run. A reference implementation
-  of the hook ships alongside the plan-create/plan-execute skill pair.
-
-  Remove this comment block once the skill is customized.
--->
 
 # Plan Create
 

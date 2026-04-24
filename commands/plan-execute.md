@@ -1,29 +1,8 @@
 ---
-name: plan-execute
-description: >
-  Execute a structured plan document by orchestrating major tasks through dedicated subagents.
-  Reads a plan-create formatted document, resolves dependencies, spawns one subagent per major
-  task, tracks progress via plan document updates, and routes discovered work. Invoke explicitly
-  via /plan-execute.
+allowed-tools: Bash, Read, Edit, Write, Glob, Grep, Agent
+description: Execute a structured plan document by orchestrating subagents per major task
 argument-hint: <path to plan document>
 ---
-
-<!--
-  TEMPLATE NOTICE
-  ───────────────
-  This file is a reusable template shipped from ~/.claude-sync/templates/plan-execute/.
-  The skill is language- and tooling-agnostic — the actual L1/L2/L3 verification commands
-  live inside the plan document (produced by plan-create), not in this file. You usually
-  do not need to edit this template per project; just drop it into .claude/skills/ and
-  remove this notice.
-
-  Plan Gate dependency: Phase 0 reads `.claude/data/plan-gate.json` and Phase 3
-  transitions it to `executing`. These writes coordinate with a `PreToolUse` hook
-  (`.claude/hooks/plan_gate.py`, optional) that blocks Edit/Write/MultiEdit/
-  NotebookEdit when planning is incomplete. The gate file itself is the source
-  of truth even if the hook is not installed — plan-execute refuses to run when
-  it shows `plan-creating` or is missing after a fresh `plan-create` call.
--->
 
 # Plan Execute
 

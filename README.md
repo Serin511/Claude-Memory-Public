@@ -17,17 +17,14 @@ A portable configuration system for [Claude Code](https://docs.anthropic.com/en/
 │   ├── perf-optimize.md    # /perf-optimize — profile and optimize bottlenecks
 │   ├── update-harness.md   # /update-harness — analyze session logs, propose rule improvements
 │   ├── add-command.md      # /add-command — guide for creating new slash commands
-│   └── system-prompt-editor.md  # /system-prompt-editor — edit global CLAUDE.md
+│   ├── system-prompt-editor.md  # /system-prompt-editor — edit global CLAUDE.md
+│   ├── plan-create.md      # /plan-create — produce a structured execution plan doc
+│   └── plan-execute.md     # /plan-execute — orchestrate subagents to run a plan doc
 ├── rules/                  # Behavioral rules (always loaded, no invocation needed)
-│   ├── chat.md             # Ask clarifying questions instead of assuming
-│   ├── git.md              # Never commit/push without explicit request
 │   ├── documentation-standard.md  # Google-style docstrings, JSDoc, test requirements
 │   ├── tdd-workflow.md     # Red-green-refactor cycle enforcement
 │   ├── read-before-guessing.md   # Read class/API definitions before accessing attributes
 │   └── subagent.md         # Worktree isolation safety, background task constraints
-├── templates/              # Skill templates to copy into projects (not auto-installed)
-│   ├── plan-create/        # /plan-create — produce a structured execution plan doc
-│   └── plan-execute/       # /plan-execute — orchestrate subagents to run a plan doc
 └── scripts/
     └── parse_sessions.py   # Extract failure signals from session logs (used by /update-harness)
 ```
@@ -143,37 +140,22 @@ Reference guide for creating new slash commands — covers frontmatter options, 
 ### `/system-prompt-editor` — Edit Global Prompt
 Opens `~/.claude/CLAUDE.md` for direct editing with backup support.
 
+### `/plan-create` — Execution Plan Creation
+Breaks down a multi-phase goal into a structured plan document with major tasks, sub-tasks, dependency ordering, verification gates, and carry-forward rules. The plan document is a durable Markdown artifact that survives session boundaries and is executable by `/plan-execute`.
+
+### `/plan-execute` — Plan Execution Orchestration
+Reads a plan document produced by `/plan-create` and executes it — one major task at a time. Each task is delegated to a dedicated subagent with full context, verification commands, and progress tracking. Handles crash recovery, dependency resolution, and discovered work routing.
+
 ## Rules
 
 Rules are always loaded into Claude Code's context. Unlike commands, they don't need to be invoked.
 
 | Rule | Purpose |
 |------|---------|
-| `chat.md` | Always ask clarifying questions for ambiguous requests |
-| `git.md` | Never commit or push without explicit user request |
 | `documentation-standard.md` | Enforce Google-style docstrings (Python) and JSDoc (TypeScript) |
 | `tdd-workflow.md` | Red → Green → Refactor cycle; tests before implementation |
 | `read-before-guessing.md` | Read class/API definitions before accessing attributes; inspect JSON before parsing |
 | `subagent.md` | Worktree isolation safety, background task constraints, zombie agent prevention |
-
-## Templates
-
-Reusable skill templates that are **not** auto-installed as global slash commands. Copy them into a project's `.claude/skills/` directory when you want `/plan-create` and `/plan-execute` scoped to that project.
-
-| Template | Purpose |
-|----------|---------|
-| `plan-create/`  | Produce a structured execution plan document for multi-phase projects |
-| `plan-execute/` | Execute a plan-create document by orchestrating subagents per major task |
-
-Deploy to a project:
-
-```bash
-mkdir -p .claude/skills
-cp -r ~/.claude-sync/templates/plan-create  .claude/skills/
-cp -r ~/.claude-sync/templates/plan-execute .claude/skills/
-```
-
-See `templates/README.md` for per-project customization notes.
 
 ## Customization
 
