@@ -19,7 +19,13 @@ A portable configuration system for [Claude Code](https://docs.anthropic.com/en/
 │   ├── add-command.md      # /add-command — guide for creating new slash commands
 │   ├── system-prompt-editor.md  # /system-prompt-editor — edit global CLAUDE.md
 │   ├── plan-create.md      # /plan-create — produce a structured execution plan doc
-│   └── plan-execute.md     # /plan-execute — orchestrate subagents to run a plan doc
+│   ├── plan-execute.md     # /plan-execute — orchestrate subagents to run a plan doc
+│   ├── codex-adversarial-review.md  # /codex-adversarial-review — Codex plan review wrapper (used by /plan-create Phase 4.5)
+│   ├── codex-review.md     # /codex-review — Codex implementation review wrapper (used by /plan-execute Phase 6)
+│   ├── codex-plan-execute.md  # /codex-plan-execute — execute a plan via Codex CLI sessions (Claude reviews)
+│   └── codex-loop.md       # /codex-loop — iteratively delegate fix-loop cycles to Codex until a termination gate is met
+├── hooks/                  # Per-project hooks (manually copied into <project>/.claude/hooks/)
+│   └── plan_gate.py        # PreToolUse hook that blocks edits while /plan-create is mid-planning
 ├── rules/                  # Behavioral rules (always loaded, no invocation needed)
 │   ├── documentation-standard.md  # Google-style docstrings, JSDoc, test requirements
 │   ├── tdd-workflow.md     # Red-green-refactor cycle enforcement
@@ -145,6 +151,53 @@ Breaks down a multi-phase goal into a structured plan document with major tasks,
 
 ### `/plan-execute` — Plan Execution Orchestration
 Reads a plan document produced by `/plan-create` and executes it — one major task at a time. Each task is delegated to a dedicated subagent with full context, verification commands, and progress tracking. Handles crash recovery, dependency resolution, and discovered work routing.
+
+### `/codex-adversarial-review` — Codex Plan Review (wrapper)
+Project-local wrapper that calls `codex exec` via Bash to adversarially review a plan document. Used by `/plan-create` Phase 4.5 to bypass the upstream `/codex:adversarial-review` plugin's `disable-model-invocation` restriction so the agent can auto-invoke it. Requires the `codex` CLI on `PATH` (`npm i -g @openai/codex`).
+
+### `/codex-review` — Codex Implementation Review (wrapper)
+Project-local wrapper that calls `codex exec` via Bash to review the diff between a base SHA and HEAD. Used by `/plan-execute` Phase 6 to review code/document deliverables. Same agent-invocation rationale as `/codex-adversarial-review`.
+
+### `/codex-plan-execute` — Codex-driven Plan Execution
+Inverse of `/plan-execute`: dispatches each major task to a `codex exec --full-auto` session (instead of a Claude subagent) and uses a Claude subagent for the Phase 6 deliverable review. Useful when you want a different model's implementation perspective, or when Codex's coding strengths fit the task. The Codex prompt must be fully self-contained — pull project invariants from CLAUDE.md / `.claude/rules/` into the prompt explicitly.
+
+### `/codex-loop` — Codex-driven Fix Loop
+Iteratively delegates one fix-loop cycle to Codex, with the Claude orchestrator checking the termination gate between cycles. Each cycle is a clean `codex exec --full-auto` run with a prior-cycle summary embedded in the prompt; loop runs until the user-specified verification command (`--until <cmd>`) is satisfied, stalls, or is aborted. Surfaces stalls and regressions to the user instead of auto-aborting.
+
+## Plan Gate Hook (optional, per-project)
+
+`hooks/plan_gate.py` is a `PreToolUse` hook that gates `Edit`/`Write`/`MultiEdit`/`NotebookEdit` while `/plan-create` is mid-planning, so Claude cannot start coding before the plan is reviewed. It is **per-project**, not global — copy it into your project rather than relying on the symlink installer.
+
+```bash
+# From your project root:
+mkdir -p .claude/hooks .claude/data
+cp ~/.claude-sync/hooks/plan_gate.py .claude/hooks/plan_gate.py
+echo ".claude/data/plan-gate.json" >> .gitignore
+```
+
+Then register the hook in your project's `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/plan_gate.py\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook reads `.claude/data/plan-gate.json` (written by `/plan-create` and `/plan-execute`) and blocks implementation tools while `stage == "plan-creating"`. Writes under `plans/` and to the gate state file itself stay allowed so the planning commands can produce their own artefacts. Manual override: `rm .claude/data/plan-gate.json`.
+
+`/plan-create` and `/plan-execute` work even without this hook installed — the gate file then acts as a soft contract between the two commands rather than a hard enforcement.
 
 ## Rules
 

@@ -6,16 +6,17 @@ argument-hint: <goal or spec description>
 
 # Plan Create
 
-Create a structured execution plan document that `plan-execute` can run. The plan
-captures major tasks, sub-tasks, dependencies, verification commands, and carry-forward
-rules in a single Markdown file.
+Create a structured execution plan document that `/plan-execute` (or
+`/codex-plan-execute`) can run. The plan captures major tasks, sub-tasks,
+dependencies, verification commands, and carry-forward rules in a single
+Markdown file.
 
 ## Why this exists
 
 Large projects fail when the plan lives only in the agent's context window. A durable
 plan document solves this: it survives session boundaries, tracks progress via git
 commits, and gives subagents the full picture when they're spawned for a major task.
-This skill produces that document.
+This command produces that document.
 
 ## Workflow
 
@@ -28,7 +29,7 @@ the duration of planning. This guarantees no code changes happen until
 Codex has adversarially reviewed the plan in Phase 4.5. If the project
 has not installed the hook, still write the gate file — it remains the
 single source of truth that the plan is in draft state, and any future
-plan-execute invocation keys off it.
+`/plan-execute` invocation keys off it.
 
 Write `.claude/data/plan-gate.json` (create the directory if missing):
 
@@ -42,7 +43,7 @@ Write `.claude/data/plan-gate.json` (create the directory if missing):
 ```
 
 Once the plan path is decided in Phase 4, update the `plan_path` field.
-This file is gitignored.
+This file should be gitignored.
 
 ### Phase 1: Gather Context
 
@@ -51,8 +52,10 @@ This file is gitignored.
 2. **Explore the codebase** — use Grep/Glob/Read to understand the project structure,
    existing tests, build system, and CI configuration. This informs task breakdown and
    verification command selection. The project's language and tooling are discovered
-   here — do not assume any particular stack.
-3. **Check for existing plans** — search for `docs/*_plan.md` or similar. If a plan
+   here — do not assume any particular stack. If the project ships a `CLAUDE.md` or
+   files under `.claude/rules/`, read them first; they typically encode invariants
+   that every sub-task must respect.
+3. **Check for existing plans** — search `plans/*.md` and `docs/*_plan.md`. If a plan
    already exists, ask the user whether to extend it or start fresh.
    - **Extending**: see "Extending an Existing Plan" below.
    - **Fresh**: create a new plan document from scratch.
@@ -107,7 +110,8 @@ Break the goal into major tasks. For each major task:
    This is informational guidance for the subagent, not a hard restriction.
 5. **Write context** — past attempts, known pitfalls, reference materials.
    Keep this concise — subagents have limited context windows. If the context
-   is extensive, write it in a separate reference file and point to it.
+   is extensive, write it in a separate reference file (e.g. `plans/refs/*.md`)
+   and point to it.
 6. **Define sub-tasks** — ordered steps within the major task, each = 1 commit.
    Aim for **7 or fewer sub-tasks per major task**. If more are needed, consider
    splitting into two major tasks — large sub-task counts risk exhausting the
@@ -127,76 +131,78 @@ Ordering principles:
 
 ### Phase 4: Draft the Plan Document
 
-Write the plan using the format below. Save to the path the user specifies, or
-default to `docs/<project-name>_plan.md`. Update `plan_path` in
+Write the plan using the format below. Save to `plans/<name>_plan.md` unless the
+user specifies a different path. The default `plans/` location matches the
+plan-gate hook's allowlist — putting the plan elsewhere may require updating
+`_ALLOWED_PREFIXES_DURING_PLANNING` in `plan_gate.py`. Update `plan_path` in
 `.claude/data/plan-gate.json` to the final path now that it is decided.
 
 ### Phase 4.5: Codex Adversarial Plan Review (MANDATORY when Codex is available)
 
-After saving the plan document, run an adversarial review against it through
-the Codex plugin. **This phase is mandatory when Codex is installed** — do
-not advance to Phase 5 without it. The plan-gate hook (if installed) is
-still in `plan-creating` mode, so any attempt to edit project source files
-in this phase will be blocked.
+After saving the plan document, run an adversarial review against it via
+the project-local `/codex-adversarial-review` wrapper command.
+**This phase is mandatory when the `codex` CLI is installed** — do not
+advance to Phase 5 without it. The plan-gate hook (if installed) is still
+in `plan-creating` mode, so any attempt to edit project source files in
+this phase will be blocked.
 
-**Precondition — Codex availability check**
+**Precondition — Codex CLI availability check**
 
-Before invoking any `/codex:*` command, verify Codex is installed:
+Before invoking the review wrapper, verify the `codex` CLI is installed:
 
-1. **CLI**: `command -v codex` returns a path (e.g. `/usr/bin/codex`).
-2. **Plugin**: the `openai-codex/codex` plugin is installed — either
-   `~/.claude/plugins/cache/openai-codex/codex/` exists, or
-   `~/.claude/plugins/installed_plugins.json` contains a
-   `codex@openai-codex` entry, or the `/codex:adversarial-review` skill
-   appears in the available skills list for this session.
+```bash
+command -v codex
+```
 
-If either check fails, **skip this phase** and emit a one-line notice to
+If it returns no path, **skip this phase** and emit a one-line notice to
 the user:
 
-> Codex CLI or plugin not installed — skipping adversarial plan review.
-> Install the `codex` CLI and the `codex@openai-codex` plugin to enable it.
+> codex CLI not installed — skipping adversarial plan review.
+> Install it (e.g. `npm i -g @openai/codex`) to enable Phase 4.5.
 
 Then proceed directly to Phase 5. The plan-gate will still transition to
 `plan-approved` after user sign-off — execution is not blocked by a missing
-review step. If only one of the two components is present, still skip and
-list which piece is missing so the user can fix the installation.
+review step.
+
+This command does not depend on the `openai-codex/codex` plugin itself —
+Phase 4.5 goes through the project-local `/codex-adversarial-review`
+wrapper (`.claude/commands/codex-adversarial-review.md`), which calls
+the `codex` CLI directly via Bash. This bypasses the
+`disable-model-invocation: true` flag on the upstream
+`/codex:adversarial-review` plugin command so the agent can auto-invoke
+it without a human step.
 
 Steps (run only when the precondition above passes):
 
+0. **Capture the pre-Phase-4.5 SHA.** Before any other step in this
+   phase, record `phase45_pre_sha = $(git rev-parse HEAD)`. This is
+   HEAD as it stands when the Codex review loop begins and defines the
+   squash base for step 7. The default flow makes no commits during
+   Phase 4.5 (see step 2 below), so step 7 is usually a no-op — but
+   capturing the SHA up front costs nothing and protects the case
+   where the user chooses to checkpoint revisions manually during a
+   long iteration.
+
 1. Confirm the plan file exists on disk (Phase 4 wrote it).
-2. **Commit + push the plan document before invoking the review.**
-   Codex's review sandbox blocks local `bash`/`git diff`, so the only
-   diff source that works reliably is GitHub via the Codex GitHub MCP.
-   Running `/codex:adversarial-review --scope working-tree` against an
-   uncommitted or unpushed file frequently returns "no actionable
-   defects" because Codex cannot fetch the file contents. Commit with
-   a descriptive WIP message and push before continuing — ask the user
-   for explicit push approval first if the project git rules prohibit
-   unprompted pushes. Typical sequence:
 
-   ```bash
-   git add <plan-path>
-   git commit -m "docs(plan): draft <plan-name> for adversarial review"
-   git push origin <current-branch>
-   ```
+2. **No commit or push required.** The `/codex-adversarial-review`
+   wrapper reads the plan file directly from the working tree and
+   embeds its contents into the Codex prompt before Codex starts, so
+   the plan document does not need to be on `origin` for the review to
+   see it. This eliminates any working-doc commit-per-round churn.
+   Step 7 below still guards against the case where a user manually
+   commits revisions during the iteration.
 
-   Capture the commit SHA (`git rev-parse HEAD~1`, or whichever was the
-   previous HEAD) as `<pre-plan-sha>` — it will be the review base.
-
-3. Invoke (only after push succeeds), using branch-diff scope so the
-   pushed commit is visible to GitHub-backed diff tools:
+3. Invoke the project-local wrapper:
 
    ```
-   /codex:adversarial-review --wait --base <pre-plan-sha> Focus on the plan
-   document at <plan-path>. Challenge the proposed approach for: logical
-   flaws, missing edge cases, invalid or unstated assumptions, simpler
-   alternatives, and hidden risks (correctness, regression, security,
-   migration). This is a planning artefact — do not propose code edits.
+   /codex-adversarial-review <plan-path>
    ```
 
-   Use `--wait` so the review blocks the conversation; the plan must be
-   approved before any execution. Codex's default model is governed by
-   `~/.codex/config.toml`, so no per-call model flag is typically needed.
+   The wrapper runs synchronously — the plan must be approved before
+   any execution, so blocking is the right default. Codex's default
+   model is governed by `~/.codex/config.toml`, so no per-call flag is
+   typically needed.
 
 4. Read Codex's verbatim output and present it to the user with brief
    notes on which findings you accept, dispute, or want to flag as open
@@ -204,13 +210,71 @@ Steps (run only when the precondition above passes):
    to attack the plan, not to design it.
 5. Apply the accepted feedback to the plan document (revise tasks, add
    risks, refine the verification protocol, split High-difficulty tasks,
-   etc.).
-6. If revisions are material, commit + push the revision (same push
-   approval flow as step 2) and re-run step 3 against the updated plan
-   using the original `<pre-plan-sha>` as the base so the review sees the
-   full accumulated diff. Stop iterating once Codex's remaining feedback
-   is informational only or the user explicitly accepts the residual
-   risks.
+   etc.). The plan-gate hook is still in `plan-creating` mode, so
+   project source files remain blocked — only the plan document itself
+   may be edited.
+6. If revisions are material, re-run step 3 against the updated plan.
+   Stop iterating once Codex's remaining feedback is informational only
+   or the user explicitly accepts the residual risks. The default flow
+   produces no intermediate commits — the branch stays clean until
+   Phase 5 sign-off unless the user manually checkpointed revisions,
+   in which case step 7 collapses them.
+
+7. **Squash Codex-review-derived plan commits.** Once step 6 terminates
+   (no further revisions expected), collapse every plan-document commit
+   that was made during Phase 4.5 — regardless of commit-message
+   prefix — into a single commit. Scope is determined by **file paths
+   touched**, not by commit-message convention: any commit in
+   `phase45_pre_sha..HEAD` that touches only plan files is in scope.
+   In the default flow this step is a no-op (the wrapper avoids
+   per-round commits); it only activates when the user deliberately
+   checkpointed revisions during a long iteration.
+
+   - **Skip when nothing to squash.** If
+     `git rev-list --count <phase45_pre_sha>..HEAD` is `0`, no
+     iteration commits exist — skip directly to Phase 5.
+
+   - **Pre-squash safety check.** List files modified across the whole
+     range:
+     ```bash
+     git diff --name-only <phase45_pre_sha>..HEAD
+     ```
+     Every path must be the plan document itself (or a plan-referenced
+     file under `plans/refs/`). The plan-gate hook blocks production
+     source edits during Phase 4.5, so out-of-scope changes should not
+     exist — but if any commit in the range touched a non-plan file
+     (e.g., gate file, settings, unrelated docs), **stop and ask the
+     user** how to split before proceeding. Do not squash across
+     scopes.
+
+   - **Soft-reset + recommit.** When the safety check passes, collapse
+     non-destructively:
+     ```bash
+     git reset --soft <phase45_pre_sha>
+     git commit -m "docs(plan): finalize plan after Codex review"
+     ```
+     `--soft` keeps every change staged — no working-tree loss. In the
+     commit body capture the audit trail so it survives the squash:
+     total Codex rounds, severity trajectory (e.g.
+     `[critical]/[high] → [medium]`), and a one-line summary of the
+     final plan shape (major-task count, notable scope changes from
+     the initial draft).
+
+   - **Force-push (only if the branch was already pushed).** Squashing
+     rewrites already-pushed history, so if the current branch has a
+     remote counterpart, request **explicit user approval** first,
+     then:
+     ```bash
+     git push --force-with-lease origin <current-branch>
+     ```
+     Never `--force` (use `--force-with-lease` so the push aborts if
+     someone else pushed in the meantime). Never on `main` or shared
+     base branches — squash applies only to the dedicated plan branch.
+
+   - **User declines the squash.** Keep the iteration commits as-is
+     and proceed to Phase 5 unchanged. The reflog preserves both the
+     pre- and post-squash history either way, so declining is
+     non-binding.
 
 ### Phase 5: Review
 
@@ -224,7 +288,7 @@ Present the plan to the user. Specifically call out:
 Incorporate feedback and finalize.
 
 After the user signs off on the final plan, mark the gate as approved so
-that `plan-execute` may proceed in the same or a future session. Update
+that `/plan-execute` may proceed in the same or a future session. Update
 `.claude/data/plan-gate.json`:
 
 ```json
@@ -247,7 +311,7 @@ When extending a plan that already has completed tasks:
 2. **New work that overlaps a DONE task's scope** → create a follow-up task:
    `T9: Follow-up — <original task name>`. Set its dependency to include the
    original task (already satisfied). This ensures the follow-up appears as
-   NOT STARTED and won't be missed by plan-execute.
+   NOT STARTED and won't be missed by /plan-execute.
 3. **New work that fits a NOT STARTED task** → append sub-tasks to that task.
 4. **Truly new scope** → create a new major task at the end.
 
@@ -270,7 +334,8 @@ This follow-up adds the missing handling.
 
 ## Plan Document Format
 
-The plan document must follow this exact structure so that `plan-execute` can parse it.
+The plan document must follow this exact structure so that `/plan-execute` and
+`/codex-plan-execute` can parse it.
 
 ````markdown
 # <Plan Name>
@@ -362,13 +427,13 @@ Keep concise — if extensive, put details in a reference file and link to it.>
 - The Summary table at the bottom must mirror all tasks for quick reference
 - Horizontal rules (`---`) separate each major task section
 - The plan document contains only **data** (tasks, configuration, metrics) — not
-  execution instructions. How to run the plan lives in the `plan-execute` skill.
+  execution instructions. How to run the plan lives in the `/plan-execute` command.
 - **Files** is informational guidance (where to start looking), not a hard restriction
 
 ## Important Notes
 
-- Do NOT start implementing during plan creation — this skill only produces the plan
-- The plan document is a living artifact — `plan-execute` updates it as work progresses
+- Do NOT start implementing during plan creation — this command only produces the plan
+- The plan document is a living artifact — `/plan-execute` updates it as work progresses
 - Carry-Forward Rules are for **plan-specific** invariants only. Do not duplicate
   rules already present in CLAUDE.md or `.claude/rules/` — subagents inherit those
   automatically

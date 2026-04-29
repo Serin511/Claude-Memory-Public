@@ -13,18 +13,18 @@ tracking progress, and routing discovered work.
 
 Large projects span multiple sessions and involve many interdependent tasks. Without
 a persistent orchestration layer, context is lost between sessions, progress tracking
-drifts, and discovered work falls through the cracks. This skill reads a plan document
-(produced by `plan-create`) and systematically executes it — one major task at a time,
+drifts, and discovered work falls through the cracks. This command reads a plan document
+(produced by `/plan-create`) and systematically executes it — one major task at a time,
 with verification gates and progress tracking baked in.
 
 ## Prerequisites
 
-- A plan document in `plan-create` format
+- A plan document in `/plan-create` format (default location: `plans/<name>_plan.md`)
 - The plan must contain a `Verification Protocol` table with L1/L2/L3 commands
 - The plan must contain at least one major task (T1, T2, ...) with sub-tasks
 
-If `$ARGUMENTS` is a file path, use that as the plan document. Otherwise, search for
-`docs/*_plan.md` files and ask the user which plan to execute.
+If `$ARGUMENTS` is a file path, use that as the plan document. Otherwise, search
+`plans/*.md` and `docs/*_plan.md` and ask the user which plan to execute.
 
 ## Workflow
 
@@ -37,17 +37,17 @@ up front with a clear message instead of mid-implementation.
 
 Three cases:
 
-1. **File missing or `stage == "inactive"`** — no `plan-create` has run
+1. **File missing or `stage == "inactive"`** — no `/plan-create` has run
    for this plan. Stop and ask the user to either:
-   - run `plan-create` first (recommended), or
+   - run `/plan-create` first (recommended), or
    - manually mark the gate as approved (only when resuming an
      already-Codex-reviewed plan in a fresh session) by writing
      `.claude/data/plan-gate.json` with
      `{"stage":"plan-approved","plan_path":"<path>","session_id":"…","started_at":"…","approved_at":"…"}`.
 
-2. **`stage == "plan-creating"`** — `plan-create` did not finish its
+2. **`stage == "plan-creating"`** — `/plan-create` did not finish its
    adversarial review. Refuse to proceed and tell the user to either
-   complete `plan-create` (so it writes `stage: plan-approved`) or
+   complete `/plan-create` (so it writes `stage: plan-approved`) or
    delete the gate file to start over.
 
 3. **`stage` is `plan-approved` or `executing`** — proceed.
@@ -329,83 +329,234 @@ Report to the user:
 
 If continuing, loop back to Phase 1 (re-read the plan to get fresh state).
 
-### Phase 6: Codex Implementation Review (MANDATORY when Codex is available)
+### Phase 6: Codex Deliverable Review (MANDATORY when Codex is available)
 
 After the major task is finalised in Phase 5 (status `DONE`, Summary
-table updated, plan commit made), run a Codex review of the actual
-code changes shipped in this iteration. This is the implementation-
-side counterpart of plan-create's Phase 4.5 — do not skip it when
-Codex is installed.
+table updated, plan commit made), run a Codex review of all deliverables
+shipped in this iteration — **both code changes and document
+deliverables**. This is the implementation-side counterpart of
+/plan-create's Phase 4.5 — do not skip it when Codex is installed.
 
-**Precondition — Codex availability check**
+**Scope**: Phase 6 applies to every major task that produced a
+deliverable, regardless of type:
+- **Code tasks** (feat, fix, refactor) → review code changes via diff
+- **Document tasks** (policy docs, rule file updates, plans) → review
+  document content for factual accuracy, cross-reference correctness,
+  and internal consistency
+- **Mixed tasks** → review both
+- **External-only tasks** (no local file changes — e.g. updates to a
+  remote tracker or knowledge base) → skip Phase 6 for that task only
+  (nothing to diff), but if the external-only task was bundled with a
+  document task in the same iteration, the document review still runs
 
-Before invoking any `/codex:*` command, verify Codex is installed:
+**Precondition — Codex CLI availability check**
 
-1. **CLI**: `command -v codex` returns a path (e.g. `/usr/bin/codex`).
-2. **Plugin**: the `openai-codex/codex` plugin is installed — either
-   `~/.claude/plugins/cache/openai-codex/codex/` exists, or
-   `~/.claude/plugins/installed_plugins.json` contains a
-   `codex@openai-codex` entry, or the `/codex:review` skill appears
-   in the available skills list for this session.
+Before invoking the review wrapper, verify the `codex` CLI is installed:
 
-If either check fails, **skip this phase** and emit a one-line notice to
-the user:
+```bash
+command -v codex
+```
 
-> Codex CLI or plugin not installed — skipping implementation review.
-> Install the `codex` CLI and the `codex@openai-codex` plugin to enable it.
+- If it returns a path → use the `/codex-review` wrapper (steps below).
+- If it returns no path → **fall back to a Claude subagent review** (do not
+  silently skip — Phase 6 is mandatory). The fallback flow:
 
-Still release the plan-gate before returning control to the user — the next
-session should not be blocked by a stale `executing` state regardless of
-whether the review ran. Use the *stage-selection rule* in the post-review
-block below (end of Phase 6): `plan-approved` when the plan still has
-unfinished Major Tasks, `inactive` (or delete the file) when the plan is
-fully complete or the user is abandoning it.
+  1. Spawn a single Claude subagent via the Agent tool, with the
+     largest-context model available (e.g. Claude Opus 4.7 1M-context).
+     Pass the subagent the same diff scope (committed range or
+     `--uncommitted` working tree) the wrapper would have used.
+  2. Use a prompt that mirrors the appropriate `/codex-review` mode
+     (`code` / `document` / `mixed`). The subagent prompt MUST embed
+     the same criteria the wrapper would for that mode:
+     - **code** — the adversarial code-review criteria (correctness
+       bugs, test gaps, over-engineering, simpler alternatives,
+       regression risks).
+     - **document** — the document-deliverable review criteria listed
+       below (factual accuracy of cited paths/lines, cross-reference
+       correctness, internal consistency, policy-vs-runtime distinction,
+       migration-roadmap completeness, cross-reference accuracy).
+     - **mixed** — BOTH the code-review criteria AND the document-
+       deliverable criteria. Do not collapse mixed into code-only.
+  3. The subagent reads the diff, returns findings classified by
+     severity, and does NOT propose edits — same contract as the wrapper.
+  4. Process the subagent's findings exactly as you would Codex's
+     (step 4 below).
+
+  Emit a one-line notice to the user when falling back:
+
+  > codex CLI not installed — using Claude subagent for Phase 6 review.
+  > Install the `codex` CLI (e.g. `npm i -g @openai/codex`) to enable
+  > the cross-model adversarial review path.
+
+Still transition the plan-gate out of `executing` (using the stage-selection
+rule below) before returning control to the user — the next session should
+not be blocked by a stale `executing` state regardless of which review path
+ran.
+
+This command does not depend on the `openai-codex/codex` plugin itself —
+Phase 6 goes through the project-local `/codex-review` wrapper
+(`.claude/commands/codex-review.md`), which calls the `codex` CLI
+directly via Bash. This bypasses the `disable-model-invocation: true`
+flag on the upstream `/codex:review` plugin command so the agent can
+auto-invoke it without a human step.
 
 Steps (run only when the precondition above passes):
 
-1. Determine the diff scope:
+0. **Capture the pre-Phase-6 SHA.** Before any other step in this phase,
+   record `phase6_pre_sha = $(git rev-parse HEAD)`. This is HEAD after
+   the Phase 5 finalize commit and defines the squash base for step 6.
+   Do not conflate this with the pre-task SHA from step 1 below —
+   pre-task SHA is the Codex-review base (diff scope); pre-Phase-6 SHA
+   is the squash base (review-derived edits only).
+
+1. Determine the diff scope and the review mode:
+
+   **Scope:**
    - Single completed major task → review every sub-task commit made
      in this run. Capture the pre-task SHA before Phase 3
-     (`git rev-parse HEAD` at that point) so it can be passed as the
-     base.
+     (`git rev-parse HEAD` at that point) and pass it as `<scope>`.
    - Multiple tasks completed in one run → review the full span from
-     the first pre-task SHA to current HEAD.
-2. **Push the branch to origin before invoking the review.** Codex's
-   review sandbox blocks local `bash`/`git diff <sha>` invocations, so
-   the only diff source that reliably works is GitHub via the Codex
-   GitHub MCP (`codex_apps/github_compare_commits` /
-   `github_fetch_file`). If the branch is not pushed, the remote view
-   of `<pre-task-sha>..HEAD` is empty and the review returns
-   "no actionable defects" because it never saw the changes. Ask the
-   user for explicit approval before pushing if project git rules
-   prohibit unprompted pushes. Typical command:
+     the first pre-task SHA to current HEAD; pass the first pre-task
+     SHA as `<scope>`.
+   - **Document-only tasks with no commits** (e.g., deliverables
+     written in the working tree but not yet committed) → pass
+     `--uncommitted` as `<scope>`. The wrapper captures `git diff HEAD`
+     (tracked unstaged + staged) AND each untracked file as a new-file
+     diff (via `git diff --no-index`), so neither tracked changes nor
+     brand-new files leak. Verify the in-scope file list first with
+     `git status --short` (which shows tracked changes AND untracked
+     files together) so the user knows what is being reviewed —
+     `git diff --name-only` would miss untracked additions.
 
-   ```bash
-   git push origin <current-branch>
+   **Mode** (chosen per the deliverable type from the task's commits
+   and changed files):
+   - `code` — task produced only code/test changes.
+   - `document` — task produced only document/policy/rule/plan
+     content; pulls in the document-deliverable criteria so the
+     reviewer prompt evaluates factual accuracy and cross-references,
+     not just code-style concerns.
+   - `mixed` — both. The reviewer prompt applies both criteria sets.
+
+2. **No push required.** The `/codex-review` wrapper prepares the diff
+   locally via Claude's Bash tool. For a committed range it runs
+   `git diff <pre-task-sha>..HEAD`. For `--uncommitted` it runs
+   `git diff HEAD` (tracked unstaged + staged) AND appends each
+   untracked file as a new-file diff via `git diff --no-index`, so
+   neither tracked changes nor brand-new files leak from the review
+   scope. The wrapper embeds the resulting diff in the Codex prompt
+   before Codex starts, so Codex's own sandboxed-`bash` restriction
+   does not apply. Optionally push the branch afterwards for backup;
+   this is independent of the review.
+
+3. **Invoke the wrapper** with the resolved scope and mode:
+
+   ```
+   /codex-review <scope> [mode]
    ```
 
-   If the user declines to push, either defer Phase 6 (leave the gate
-   at `executing` for resume) or skip the review with explicit user
-   acknowledgement that the implementation is unreviewed.
-3. Invoke (only after push succeeds):
+   Examples:
+   - Code task on a committed range: `/codex-review <pre-task-sha>` (mode defaults to `code`)
+   - Document task on a committed range: `/codex-review <pre-task-sha> document`
+   - Document task with uncommitted deliverables: `/codex-review --uncommitted document`
+   - Mixed task on a committed range: `/codex-review <pre-task-sha> mixed`
 
-   ```
-   /codex:review --background --base <pre-task-sha>
-   ```
+   The wrapper runs synchronously and streams Codex's verbatim output
+   into the conversation. The wrapper's `document` and `mixed` mode
+   prompts already embed the document-deliverable review criteria
+   (factual accuracy, cross-reference correctness, internal
+   consistency, policy-vs-runtime distinction, migration roadmap
+   completeness) — no manual cross-check is required. Codex's default
+   model is governed by `~/.codex/config.toml`, so no per-call flag
+   is typically needed.
 
-   Use `--background` so the review does not block follow-up actions
-   (it is typically non-trivial). Track progress with `/codex:status`
-   and pull the result with `/codex:result` once complete. Codex's
-   model is governed by `~/.codex/config.toml`.
 4. When the review completes, surface findings to the user and
    classify each one:
    - **Bug** or **test gap** → propose a follow-up sub-task on the
      completed major task or, if out of scope, a new major task.
      Append it via the same plan-update mechanism used during Phase 4.
+   - **Factual error** (document) → fix immediately if trivial, or
+     propose a follow-up sub-task. Factual errors include: wrong file
+     paths or line numbers, claims about code behaviour that don't
+     match the actual codebase, missing migration items, incorrect
+     dependency ordering.
+   - **Consistency issue** (document) → flag contradictions between
+     the deliverable and existing rule files, plan documents, or other
+     deliverables from the same iteration.
    - **Over-engineering** or **simpler-alternative** → present the
      suggestion; let the user decide whether to refactor now or defer.
    - **Informational** → report briefly, no action.
 5. **Do not** auto-apply Codex suggestions. The user owns the decision.
+
+**Document deliverable review criteria** — the canonical list. The
+`/codex-review` wrapper embeds these into its `document` and `mixed`
+mode prompts; the Claude subagent fallback (precondition path) MUST
+include the same list verbatim in its review prompt so both review
+paths apply identical criteria. Any divergence between the four
+copies (this canonical list, the wrapper's `document` prompt, the
+wrapper's `mixed` prompt, the `/codex-plan-execute` Phase 6 review
+subagent prompt) is a defect — keep them word-for-word identical:
+
+- All cited file paths and line numbers are verifiable via `grep` against the actual codebase.
+- No claims about code behaviour that contradict the actual implementation.
+- Internal consistency: no contradictions between sections within the same document, or between this deliverable and existing `.claude/rules/` content / other plan documents.
+- Policy vs runtime distinction (when applicable): decided policy is not presented as current runtime behaviour.
+- Migration roadmap completeness: all identified NEEDS_MIGRATION items are covered by sub-tickets with correct dependency ordering.
+- Cross-reference accuracy: ticket IDs, rule IDs, and external references are correct.
+
+6. **Squash Codex-review-derived plan commits.** Once step 5 completes
+   (no further plan edits expected from this review), collapse every
+   plan-document commit that was made during Phase 6 — regardless of
+   commit-message prefix — into a single commit. Scope is determined by
+   **file paths touched**, not by commit-message convention: in practice
+   Phase 6 routing mostly produces `docs(plan):` commits, but any
+   commit in `phase6_pre_sha..HEAD` that touches only plan files is in
+   scope.
+
+   - **Skip when nothing to squash.** If
+     `git rev-list --count <phase6_pre_sha>..HEAD` is `0`, no Codex
+     feedback was routed — skip to the gate cleanup below.
+
+   - **Pre-squash safety check.** List files modified across the whole
+     range:
+     ```bash
+     git diff --name-only <phase6_pre_sha>..HEAD
+     ```
+     Every path must be the plan document itself (or a plan-referenced
+     file under `plans/refs/`). If any commit in the range touched
+     production source — typically a code fix the user chose to apply
+     immediately during step 4 — **stop and ask the user** how to split
+     before proceeding. Do not squash across scopes; code-fix commits
+     stay as-is, only plan-edit commits are squashed. If the two are
+     interleaved, the user must decide whether to cherry-pick the plan
+     commits onto a clean base or keep history intact.
+
+   - **Soft-reset + recommit.** When the safety check passes, collapse
+     non-destructively:
+     ```bash
+     git reset --soft <phase6_pre_sha>
+     git commit -m "docs(plan): apply T<N> Codex review feedback"
+     ```
+     `--soft` keeps every change staged — no working-tree loss. In the
+     commit body capture the audit trail so it survives the squash:
+     total Codex rounds, which findings were accepted vs disputed vs
+     informational, and the IDs of any follow-up sub-tasks or new major
+     tasks added to the plan.
+
+   - **Force-push (only if the branch was already pushed).** Squashing
+     rewrites already-pushed history, so if the current branch has a
+     remote counterpart, request **explicit user approval** first,
+     then:
+     ```bash
+     git push --force-with-lease origin <current-branch>
+     ```
+     Never `--force` (use `--force-with-lease` so the push aborts if
+     someone else pushed in the meantime). Never on `main` or shared
+     base branches — squash applies only to the current execution
+     branch.
+
+   - **User declines the squash.** Keep the iteration commits as-is and
+     proceed to the gate cleanup. The reflog preserves both the pre-
+     and post-squash history either way, so declining is non-binding.
 
 After the review is complete (or running in the background and
 acknowledged by the user), transition the gate out of `executing` so the
@@ -417,8 +568,8 @@ depends on whether the plan still has unfinished work:
 - *Plan still has Major Tasks that are NOT STARTED or IN PROGRESS (the
   common case — one task just finished, others remain):* set stage to
   `plan-approved`. The plan is still the active, Codex-reviewed
-  execution artifact; the next `plan-execute` invocation should resume
-  on the next executable task without requiring a fresh `plan-create`
+  execution artifact; the next `/plan-execute` invocation should resume
+  on the next executable task without requiring a fresh `/plan-create`
   cycle.
 
   ```json
@@ -446,15 +597,14 @@ depends on whether the plan still has unfinished work:
   rm "$CLAUDE_PROJECT_DIR/.claude/data/plan-gate.json"
   ```
 
-If the user chose to defer the Codex review (e.g. they want to push
-first), leave the gate at `executing` and the next plan-execute
-invocation will resume from there.
+If the user chose to defer the Codex review, leave the gate at
+`executing` and the next `/plan-execute` invocation will resume from there.
 
 ---
 
 ## Plan Document Format Reference
 
-The plan document must follow the `plan-create` format. Key elements this skill
+The plan document must follow the `/plan-create` format. Key elements this command
 depends on for parsing:
 
 ### Required Sections
@@ -505,7 +655,7 @@ editing by the subagent:
 
 ## Resuming Across Sessions
 
-This skill is designed to survive session boundaries. When invoked in a new session:
+This command is designed to survive session boundaries. When invoked in a new session:
 
 1. It reads the plan document (which is committed to git)
 2. It finds the next task: either an `IN PROGRESS` task to resume, or the next
